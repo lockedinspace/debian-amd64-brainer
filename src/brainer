@@ -243,19 +243,16 @@ cat << EOF
 	You can pass the -y argument to omit the prompt.
 
 	- To install a module with the most stable version (recommended):
-	brainer --install moduleName
-	                            stable
-		              -y
-				     
+	brainer --install [-y] moduleName
+		                              stable
+
 	- To install latest version:
-	brainer --install moduleName latest
-	                  -y
-	        
+	brainer --install [-y] moduleName latest
+
 	- To install a specific module version:
-	brainer --install moduleName 0.2
-	                  -y
-    
-    
+	brainer --install [-y] moduleName 0.2
+	                  
+
 	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
 EOF
 exit 0		
@@ -272,8 +269,7 @@ cat << EOF
 	You can pass the -y argument to omit the prompt.
 
 	- To uninstall a module:
-	brainer --uninstall moduleName
-	                    -y
+	brainer --uninstall [-y] moduleName
 	
 	
 	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
@@ -291,12 +287,10 @@ cat << EOF
 	You can pass the -y argument to omit the prompt.
 
 	- To update a module to the latest version:
-	brainer --update moduleName
-		             -y
+	brainer --update [-y] moduleName
 		
 	- To update brainer to the latest version:
-	brainer --update brainer
-		             -y
+	brainer --update [-y] brainer
     
 	
 	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
@@ -316,12 +310,10 @@ cat << EOF
 	You can pass the -y argument to omit the prompt.
 	
 	- To remove only brainer:
-	brainer --remove 
-		             -y
+	brainer --remove [-y]
 	
 	- Complete remove:
-	brainer --remove --purge
-		             -y
+	brainer --remove [-y] --purge
 	
 	
 	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
