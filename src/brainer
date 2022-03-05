@@ -269,7 +269,7 @@ cat << EOF
 	brainer --uninstall uninstalls a module 
 	located on the (${BRAINER_FILES_FOLDER}modules/) folder.
 
-	You can pass the -y argument to omit the prompt.s
+	You can pass the -y argument to omit the prompt.
 
 	- To uninstall a module:
 	brainer --uninstall moduleName
