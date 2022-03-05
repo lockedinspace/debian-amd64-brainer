@@ -1,0 +1,748 @@
+#!/usr/bin/env bash
+
+# v0.1 Brainer module manager 07-10-2021 | Debian 11 bullseye x86-64
+# Check www.lockedinspace.com/solutions/brainer.html for more information.
+# GNU bash, version 5.1.4(1)-release (x86_64-pc-linux-gnu)
+# Copyright (C) 2020 Free Software Foundation, Inc.
+# By lockedinspace.com
+
+# Script dependencies, versions could be higher or lower, Brainer was made with the following specs:
+# curl | 7.74.0 
+# wget | 1.21
+# GNU Awk 4.0.2
+
+# Global variables.
+ROOT_UID=0
+BRAINER_PATH='/usr/local/sbin/'
+BRAINER_EXEC='/usr/local/sbin/brainer'
+BRAINER_FILES_FOLDER='/usr/local/sbin/brainer.d/'
+BRAINER_MODULES_FOLDER='/usr/local/sbin/brainer.d/modules'
+CURRENT_VERSION=0.1
+BRAINER_OS='debian'
+BRAINER_DIST='amd64'
+BRAINER_BITS=64
+BRAINER_VERSION_URL="https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/brainer-latest-version.html"
+BRAINER_REPO_URL='https://repo.lockedinspace.com'
+
+# First-install function, used to set up environment.
+setup-environment()
+{
+	if [ "$UID" -eq "$ROOT_UID" ]; then
+		:
+	else
+		echo 'ERROR: Brainer needs to operate as sudo/root.'
+		exit 1
+	fi
+	if [ -L ${BRAINER_EXEC} ] && [ -e ${BRAINER_EXEC} ]; then
+		echo 'Performing the setup on an already good brainer environment will break the program!'
+		exit 1
+	fi
+	echo 'Creating environment...'
+	mkdir -p $BRAINER_FILES_FOLDER
+	chmod 744 brainer
+	mv brainer $BRAINER_FILES_FOLDER
+	ln -s ${BRAINER_FILES_FOLDER}brainer ${BRAINER_PATH}
+	echo 'Type brainer --help to gather more information.'
+	brainer --help
+	exit 0
+}
+
+if [ "$1" = '--setup' ]; then
+	setup-environment
+fi
+
+# Checks if script is running as root/sudo user.
+if [ "$UID" -eq "$ROOT_UID" ]; then
+	:
+else
+	echo 'ERROR: Brainer needs to operate as sudo/root.'
+	exit 1
+fi
+
+# Checks if brainer is installed on $BRAINER_EXEC path.
+if [ ! -f $BRAINER_EXEC ]; then
+  echo "ERROR: Could not locate brainer on path. Please run the --setup option first."
+  exit 1
+fi
+
+# Checks if modules folder is created.
+if [ -d $BRAINER_MODULES_FOLDER ]; then
+	:
+else
+	mkdir -p $BRAINER_MODULES_FOLDER
+	exit 1
+fi
+
+# Checks if cURL is installed on the machine.
+if (! command -v curl -V &> /dev/null); then
+    echo 'ERROR: cURL could not be found.'
+    exit 1
+fi
+
+# Checks if wget is installed on the machine.
+if (! command -v wget -V &> /dev/null); then
+    echo 'ERROR: wget could not be found.'
+    exit 1
+fi
+
+# Checks if awk is installed on the machine.
+if (! command -v awk -V &> /dev/null); then
+    echo 'ERROR: awk could not be found.'
+    exit 1
+fi
+
+# Checks if brainer has access to the remote repo.
+check-network-connectivity() 
+{
+	networkCheck=$(curl -s -o /dev/null -w "%{http_code}" $BRAINER_VERSION_URL)
+	if [ $networkCheck -eq 200 ]; then
+		networkConnectivity=true 
+	else
+		networkConnectivity=false
+	fi
+}
+check-network-connectivity
+
+# Defining global/useful functions.
+
+# Prompts the user for yes or no confirmation.
+user-confirmation-prompt()
+{
+	while true; do
+	    read -p "$1" answer
+	    case $answer in
+		yes) return 0;;
+		no) return 1;;
+		* ) echo "Please answer yes or no.";;
+	    esac
+	done	
+}
+
+# Returns the date as 'YEAR-MONTH-DAY' format when called.
+print-current-date() 
+{
+	date '+%Y-%m-%d'
+	exit 0
+}
+
+# Checks if a module exists on the remote repo.
+check-if-module-exists()
+{
+	curl -s https://www.lockedinspace.com/solutions/${BRAINER_OS}/${BRAINER_DIST}/raw-available-modules.html 2>&1 | grep -w $1 > /dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		:
+	else
+		echo "ERROR: Module: $1 not found."
+		exit 1
+	fi
+}
+
+# Checks if a specified version for a module exists.
+check-if-module-version-exists()
+{
+	curl -s https://www.lockedinspace.com/solutions/${BRAINER_OS}/${BRAINER_DIST}/raw-available-modules.html | grep -w $1 >/dev/null
+	if [ $? -eq 0 ]; then
+		:
+	else
+		echo "ERROR: Provided version: $1 not found."
+		exit 1
+	fi
+}
+
+# Checks if the module passed as argument is installed locally.
+check-if-module-installed-local()
+{
+	if [ -f ${BRAINER_FILES_FOLDER}modules/$1 ]; then
+		echo "ERROR: Seems like $1 module already exists on the system."
+		exit 1
+	fi
+}
+
+# Returns general help.
+howto() 
+{
+cat << EOF
+
+	Behind the scenes, Brainer, installs and
+	uninstalls scripts whenever the end user
+	needs it.
+
+	- To view your current Brainer version:
+	brainer --version
+	
+	- To list all available modules:
+	brainer --list-modules 
+	                       --help
+	                 
+	- To install a module:
+	brainer --install moduleName version
+	                  --help
+	                  
+	- To uninstall a module:
+	brainer --uninstall moduleName
+	                    --help
+	                    
+	- To update a module to the latest version (or Brainer):
+	brainer --update moduleName
+	                 --help
+	
+	- To remove brainer from this workspace:
+	brainer --remove
+	                 --help
+					 
+	If you are having trouble with Brainer, please visit:
+		https://www.lockedinspace.com/solutions/brainer-initiation.html
+	
+	Contact on:
+	        https://www.lockedinspace.com/contact.html
+	
+    
+	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
+EOF
+exit 0		
+}
+
+# Returns --list-modules argument general help.
+howto-list-modules() 
+{
+cat << EOF
+
+	brainer --list-modules lists
+	modules (scripts) for the 
+	current OS (${BRAINER_OS}).
+	
+	- To list your local installed modules:
+	brainer --list-modules --local
+	
+	- To know more information about a module:
+	brainer --list-modules --info disk-analyzer
+	
+	- To list all the modules for every OS:
+	brainer --list-modules --all
+	
+	- To list all the modules from specific OS:
+	brainer --list-modules --all Amazon-linux-2
+	
+		*If multiple OS needed be searched at the same time:
+	brainer --list-modules --all 'MacOS|Debian'
+
+	
+	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
+EOF
+exit 0		
+}
+
+# Returns --install argument general help.
+howto-install() 
+{
+cat << EOF
+
+	brainer --install installs a module 
+	on the (${BRAINER_FILES_FOLDER}modules/) folder.
+	
+	You can pass the -y argument to omit the prompt.
+
+	- To install a module with the most stable version (recommended):
+	brainer --install moduleName
+	                            stable
+		              -y
+				     
+	- To install latest version:
+	brainer --install moduleName latest
+	                  -y
+	        
+	- To install a specific module version:
+	brainer --install moduleName 0.2
+	                  -y
+    
+    
+	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
+EOF
+exit 0		
+}
+
+# Returns --uninstall argument general help.
+howto-uninstall() 
+{
+cat << EOF
+
+	brainer --uninstall uninstalls a module 
+	located on the (${BRAINER_FILES_FOLDER}modules/) folder.
+
+	You can pass the -y argument to omit the prompt.s
+
+	- To uninstall a module:
+	brainer --uninstall moduleName
+	                    -y
+	
+	
+	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
+EOF
+exit 0		
+}
+
+# Returns --update argument general help.
+howto-update() 
+{
+cat << EOF
+
+	brainer --update updates a module or Brainer.
+
+	You can pass the -y argument to omit the prompt.
+
+	- To update a module to the latest version:
+	brainer --update moduleName
+		             -y
+		
+	- To update brainer to the latest version:
+	brainer --update brainer
+		             -y
+    
+	
+	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
+EOF
+exit 0		
+}
+
+# Returns --remove argument general help.
+howto-remove() 
+{
+cat << EOF
+
+	brainer --remove removes brainer from this computer.
+	If you want a complete remove, use the --purge option,
+	it will remove modules installed through Brainer.
+
+	You can pass the -y argument to omit the prompt.
+	
+	- To remove only brainer:
+	brainer --remove 
+		             -y
+	
+	- Complete remove:
+	brainer --remove --purge
+		             -y
+	
+	
+	Brainer ${CURRENT_VERSION} for ${BRAINER_OS}_${BRAINER_DIST}
+EOF
+exit 0		
+}
+if [ $# -eq 0 ]; then
+	echo '--help to display options.'
+	exit 2
+fi
+# Brainer core's structure.
+while [ $# -gt 0 ]; do
+case $1 in
+--version)
+	if [ "$networkConnectivity" = true ]; then
+		content=$(wget -t 1 --timeout=5 $BRAINER_VERSION_URL -q -O -)
+		if [[ "$content" > "${CURRENT_VERSION}" ]]; then
+			echo 'WARNING: You are running an outdated version, please consider updating.'
+			echo -e "Local version: ${CURRENT_VERSION}"
+			echo "Latest version: ${content}"
+			exit 0
+		else
+			echo "Local version: ${CURRENT_VERSION}"
+			echo "Latest version: ${content}"
+			exit 0
+		fi
+	else
+		echo 'WARNING: Could not connect to www.lockedinspace.com'
+		echo "Local version: ${CURRENT_VERSION}"
+		exit 0
+	fi
+	;;
+--help)
+	howto
+	;;
+--list-modules)
+	if [ "$2" = "--help" ]; then
+		howto-list-modules
+		exit 0
+	elif [ "$2" = "--local" ]; then
+		if [ -d $BRAINER_MODULES_FOLDER ]; then
+			ls $BRAINER_MODULES_FOLDER
+			exit 0
+		else
+			echo 'ERROR: Seems like modules folder does not exist.'
+			exit 1
+		fi
+	elif [ "$networkConnectivity" = true ] && [ "$2" = "--info" ]; then
+		if [ -z "$3" ]; then
+			echo 'ERROR: Module name is needed.'
+			exit 1
+		else
+			echo "Searching documentation for module: ${3}"
+			sleep 1
+			curl -s https://www.lockedinspace.com/solutions/module-documentation/raw-${3}.html | less
+			exit 0
+		fi
+	elif [ "$networkConnectivity" = true ] && [ "$2" = "--all" ]; then	
+		if [ -z $3 ]; then
+			echo 'Listing all available modules:'
+			curl -s https://www.lockedinspace.com/solutions/raw-all-available-modules.html
+			exit 0
+		else
+			echo "Listing all available modules for OS [$3]:"
+			echo 'MODULE:                     OS:'
+			curl -s https://www.lockedinspace.com/solutions/raw-all-available-modules.html | grep -E $3 
+			exit 0
+		fi
+	elif [ "$networkConnectivity" = true ]; then
+		echo "Listing modules for ${BRAINER_OS}:"
+		curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/raw-available-modules.html
+		exit 0
+	else
+		echo 'ERROR: Could not connect to www.lockedinspace.com'
+		exit 1
+	fi
+	;;
+--install)
+	if [ "$2" = "--help" ]; then
+		howto-install
+		exit 0
+	elif [ "$networkConnectivity" = true ] && [ "$2" = "-y" ]; then
+		check-if-module-exists $3
+		if [ "$4" = "stable" ] || [ -z $4 ]; then
+			check-if-module-installed-local $3
+			echo "Module: $3 found and ready to be installed."
+			echo "Installing: stable version..."
+			tmpStableVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/raw-available-modules.html | grep -w "$3" | awk '{print $2}')
+			wget ${BRAINER_REPO_URL}/solutions/modules/$3/$BRAINER_OS/$BRAINER_DIST/$tmpStableVersion\s/$3 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+			if [ $? -ge 1 ]; then
+				echo 'ERROR: Something went wrong while trying to download the module.'
+				exit 1
+			fi
+			chmod +x ${BRAINER_FILES_FOLDER}modules/$3
+			ln -s ${BRAINER_FILES_FOLDER}modules/$3 ${BRAINER_PATH}
+			echo "$3 module installed, try running: $3 --help"
+			exit 0	
+		elif [ "$4" = "latest" ]; then
+			echo "Module: $3 found and ready to be installed."
+			echo "Installing: latest version..."
+			tmpLatestVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/raw-available-modules.html | grep -w "$3" | awk '{print $3}')
+			check-if-module-installed-local $3
+			wget ${BRAINER_REPO_URL}/solutions/modules/$3/$BRAINER_OS/$BRAINER_DIST/$tmpLatestVersion\l/$3 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+			if [ $? -ge 1 ]; then
+				echo 'ERROR: Something went wrong while trying to download the module.'
+				exit 1
+			fi
+			chmod +x ${BRAINER_FILES_FOLDER}modules/$3
+			ln -s ${BRAINER_FILES_FOLDER}modules/$3 ${BRAINER_PATH}
+			echo "$3 module installed, try running: $3 --help"
+			exit 0
+		elif [ ! -z $4 ] && [[ $4 =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+			check-if-module-installed-local $3
+			check-if-module-version-exists $4
+			echo "Module: $3 found and ready to be installed."
+			echo "Installing: $4 version..."
+			wget ${BRAINER_REPO_URL}/solutions/modules/$3/$BRAINER_OS/$BRAINER_DIST/history/$4/$3 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+			if [ $? -ge 1 ]; then
+				echo 'ERROR: Something went wrong while trying to download the module.'
+				exit 1
+			fi
+			chmod +x ${BRAINER_FILES_FOLDER}modules/$3
+			ln -s ${BRAINER_FILES_FOLDER}modules/$3 ${BRAINER_PATH}
+			echo "$3 module $4 installed, try running: $3 --help"
+			exit 0
+	else
+		echo "ERROR: Module $3 / version: $4 could not be found."
+		exit 1
+	fi
+	elif [ "$networkConnectivity" = true ] && [ ! -z $2 ]; then
+		check-if-module-exists $2
+		if [ -z $3 ] || [ "$3" = "stable" ]; then
+			check-if-module-installed-local $2
+			echo "Module: $2 found and ready to be installed."
+			user-confirmation-prompt "Do you want to install this module? [yes|no]: "
+			if [ $? -eq 0 ]; then
+				echo "Installing: stable version..."
+				tmpStableVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/raw-available-modules.html | grep -w "$2" | awk '{print $2}') 
+				wget ${BRAINER_REPO_URL}/solutions/modules/$2/$BRAINER_OS/$BRAINER_DIST/$tmpStableVersion\s/$2 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+				if [ $? -ge 1 ]; then
+					echo 'ERROR: Something went wrong while trying to download the module.'
+					exit 1
+				fi
+				chmod +x ${BRAINER_FILES_FOLDER}modules/$2
+				ln -s ${BRAINER_FILES_FOLDER}modules/$2 ${BRAINER_PATH}
+				echo "$2 module installed, try running: $2 --help"
+				exit 0
+			else
+				echo 'Install aborted.'
+				exit 1
+			fi
+		elif [ ! -z $3 ] && [ "$3" = "latest" ]; then
+			check-if-module-installed-local $2
+			echo "Module: $2 found and ready to be installed."
+			user-confirmation-prompt "Do you want to install this module? [yes|no]: "
+			if [ $? -eq 0 ]; then
+				echo "Installing: latest version..."
+				tmpLatestVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/raw-available-modules.html | grep -w "$2" | awk '{print $3}')
+				
+				wget ${BRAINER_REPO_URL}/solutions/modules/$2/$BRAINER_OS/$BRAINER_DIST/$tmpLatestVersion\l/$2 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+				if [ $? -ge 1 ]; then
+					echo 'ERROR: Something went wrong while trying to download the module.'
+					exit 1
+				fi
+				chmod +x ${BRAINER_FILES_FOLDER}modules/$2
+				ln -s ${BRAINER_FILES_FOLDER}modules/$2 ${BRAINER_PATH}
+				echo "$2 module installed, try running: $2 --help"
+				exit 0
+			else
+				echo 'Install aborted.'
+				exit 1
+			fi
+		elif [ ! -z $3 ] && [[ $3 =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+			check-if-module-installed-local $2
+			check-if-module-version-exists $3
+			user-confirmation-prompt "Do you want to install this module with version $3 ? [yes|no]: "
+			if [ $? -eq 0 ]; then
+				echo "Module: $2 found and ready to be installed."
+				echo "Installing: $3 version..."
+				wget ${BRAINER_REPO_URL}/solutions/modules/$2/$BRAINER_OS/$BRAINER_DIST/history/$3/$2 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+				if [ $? -ge 1 ]; then
+					echo 'ERROR: Something went wrong while trying to download the module.'
+					exit 1
+				fi
+				chmod +x ${BRAINER_FILES_FOLDER}modules/$2
+				ln -s ${BRAINER_FILES_FOLDER}modules/$2 ${BRAINER_PATH}
+				echo "$2 module $3 installed, try running: $2 --help"
+				exit 0
+			else
+				echo 'Install aborted.'
+				exit 1
+			fi
+		else
+			echo "ERROR: Provided version: $3 not found."
+			exit 1
+		fi
+	else
+		if [ "$networkConnectivity" = true ]; then
+			echo '--install --help to display options.'
+			exit 2
+		else 
+			echo 'ERROR: Could not connect to www.lockedinspace.com'
+			exit 1
+		fi
+	fi
+	;;
+--uninstall)
+	if [ "$2" = "--help" ]; then
+		howto-uninstall
+		exit 0
+		
+	elif [ -f ${BRAINER_FILES_FOLDER}modules/$2 ]; then
+		echo "Module $2 found..."
+		user-confirmation-prompt "Do you want to uninstall this module? [yes|no]: "
+		if [ $? -eq 0 ]; then
+			echo "Proceeding to uninstall module: $2"
+			rm -rf ${BRAINER_FILES_FOLDER}modules/$2 ${BRAINER_PATH}$2
+			if [ $? -eq 0 ]; then
+				echo "$2 successfully removed."
+				exit 0
+			else
+				echo "ERROR: Could not delete properly."
+				exit 1
+			fi
+		else
+			echo "Uninstall aborted."
+			exit 1
+		fi
+		exit 1
+	elif [ "$2" = "-y" ] && [ -f ${BRAINER_FILES_FOLDER}modules/$3 ]; then
+		echo "Proceeding to uninstall module: $3"
+		rm -rf ${BRAINER_FILES_FOLDER}modules/$3 ${BRAINER_PATH}$3
+		if [ $? -eq 0 ]; then
+			echo "$3 successfully removed."
+			exit 0
+		else
+			echo "ERROR: Could not delete properly."
+			exit 1
+		fi	
+	else 
+		if [ $# = 1 ]; then
+			echo '--uninstall --help to display options.'
+			exit 2
+		fi
+		if [ "$2" = "-y" ]; then
+			
+			echo "ERROR: Module $3 could not be found locally."
+			exit 2
+		else
+			echo "ERROR: Module $2 could not be found locally."
+			exit 2
+		fi
+		
+	fi
+	;;
+--update)
+	if [ "$2" = "--help" ]; then
+		howto-update
+		exit 0
+		
+	elif [ "$2" = "brainer" ] && [ -z $3 ]; then
+		user-confirmation-prompt "Do you want to update brainer to latest? [yes|no]: "
+		if [ $? -eq 0 ]; then
+			tmpLatestVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/brainer-latest-version.html)
+			if [ $tmpLatestVersion = $CURRENT_VERSION ]; then
+				echo 'ERROR: You are already running latest brainer version.'
+				exit 1
+			else 
+				echo "Proceeding to update to latest version."
+				curl ${BRAINER_REPO_URL}/solutions/$2/$BRAINER_OS/$BRAINER_DIST/$tmpLatestVersion\l/$2 -o ${BRAINER_FILES_FOLDER}/brainer 2>&1
+				ln -sf ${BRAINER_FILES_FOLDER}brainer ${BRAINER_PATH}
+				if [ $? -eq 0 ]; then
+					echo 'Brainer updated to its latest version'
+					exit 0
+				else
+					echo 'ERROR: Something went wrong while trying to download brainer'
+					exit 1
+				fi 
+			fi
+		else
+			echo "Update aborted."
+			exit 1
+		fi
+	elif [ "$2" = "-y" ] && [ "$3" = "brainer" ]; then
+		tmpLatestVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/brainer-latest-version.html)
+		if [ $tmpLatestVersion = $CURRENT_VERSION ]; then
+			echo 'ERROR: You are already running latest brainer version.'
+			exit 1
+		else 
+			echo "Proceeding to update to latest version."
+			curl ${BRAINER_REPO_URL}/solutions/$3/$BRAINER_OS/$BRAINER_DIST/$tmpLatestVersion\l/$3 -o ${BRAINER_FILES_FOLDER}/brainer 2>&1
+			ln -sf ${BRAINER_FILES_FOLDER}brainer ${BRAINER_PATH}
+			if [ $? -eq 0 ]; then
+				echo 'Brainer updated to its latest version'
+				exit 0
+			else
+				echo 'ERROR: Something went wrong while trying to download brainer'
+				exit 1
+			fi
+		fi
+	elif [ -f ${BRAINER_FILES_FOLDER}modules/$2 ] && [ -z $3 ] || [ "$3" = "latest" ]; then
+		echo "Module $2 found..."
+		user-confirmation-prompt "Do you want to update this module to latest? [yes|no]: "
+		if [ $? -eq 0 ]; then
+			echo "Proceeding to delete local module: $2"
+			rm -rf ${BRAINER_FILES_FOLDER}modules/$2 ${BRAINER_PATH}$2
+			if [ $? -eq 0 ]; then
+				echo "Proceeding to update to latest version."
+				tmpLatestVersion=$(curl -s https://www.lockedinspace.com/solutions/${BRAINER_OS}/${BRAINER_DIST}/raw-available-modules.html | grep -w "$2" | awk '{print $3}')
+			wget ${BRAINER_REPO_URL}/solutions/modules/$2/$BRAINER_OS/$BRAINER_DIST/$tmpLatestVersion\l/$2 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+			if [ $? -ge 1 ]; then
+				echo 'ERROR: Something went wrong while trying to download the module.'
+				exit 1
+			fi
+			chmod +x ${BRAINER_FILES_FOLDER}modules/$2
+			ln -s ${BRAINER_FILES_FOLDER}modules/$2 ${BRAINER_PATH}
+			echo "$2 module updated, try running: $2 --version"
+				exit 0
+			else
+				echo "ERROR: Could not delete properly."
+				exit 1
+			fi
+		else
+			echo "Update aborted."
+			exit 1
+		fi
+	elif [ -f ${BRAINER_FILES_FOLDER}modules/$3 ] && [ "$2" = "-y" ]; then
+		echo "Module $3 found..."
+		if [ $? -eq 0 ]; then
+			echo "Proceeding to delete local module: $3"
+			rm -rf ${BRAINER_FILES_FOLDER}modules/$3 ${BRAINER_PATH}$3
+			if [ $? -eq 0 ]; then
+				echo "Proceeding to update to latest version."
+				tmpLatestVersion=$(curl -s https://www.lockedinspace.com/solutions/$BRAINER_OS/$BRAINER_DIST/raw-available-modules.html | grep -w $3 | awk '{print $3}')
+			wget ${BRAINER_REPO_URL}/solutions/modules/$3/$BRAINER_OS/$BRAINER_DIST/$tmpLatestVersion\l/$3 -P ${BRAINER_FILES_FOLDER}modules/ > /dev/null 2>&1
+			if [ $? -ge 1 ]; then
+				echo 'ERROR: Something went wrong while trying to download the module.'
+				exit 1
+			fi
+			chmod +x ${BRAINER_FILES_FOLDER}modules/$3
+			ln -s ${BRAINER_FILES_FOLDER}modules/$3 ${BRAINER_PATH}
+			echo "$3 module updated, try running: $3 --version"
+				exit 0
+			else
+				echo "ERROR: Could not delete properly."
+				exit 1
+			fi
+		else
+			echo "Update aborted."
+			exit 1
+		fi
+	elif [ "$2" = "-y" ] && [ ! -f ${BRAINER_FILES_FOLDER}modules/$3 ]; then
+		echo "ERROR: Module $3 could not be found locally."
+		exit 1
+	elif [ ! -f ${BRAINER_FILES_FOLDER}modules/$2 ]; then
+		echo "ERROR: Module $2 could not be found locally."
+		exit 1	
+	else
+		if [ $# = 1 ]; then
+			echo '--update --help to display options.'
+			exit 2
+		fi
+		echo 'ERROR: Passed arguments not valid.'
+		exit 2
+	fi
+	;;
+--remove)
+	if [ "$2" = "--help" ]; then
+		howto-remove
+	fi
+	if [ "$3" = "--purge" ] && [ "$2" = "-y" ]; then
+		echo 'Proceeding to delete modules...'
+		for i in $(ls $BRAINER_MODULES_FOLDER)
+		do
+			brainer --uninstall -y $i
+		done
+		echo 'Proceeding to delete brainer...'
+		rm -rf $BRAINER_EXEC $BRAINER_FILES_FOLDER
+		echo 'Brainer & modules successfully removed from this workspace.'
+		exit 0
+	elif [ "$2" = "--purge" ]; then
+		user-confirmation-prompt "Do you want to delete brainer & modules? [yes|no]: "
+		if [ $? -eq 0 ]; then
+			echo 'Proceeding to delete modules...'
+			for i in $(ls $BRAINER_MODULES_FOLDER)
+			do
+				brainer --uninstall -y $i
+			done
+			echo 'Proceeding to delete brainer...'
+			rm -rf $BRAINER_EXEC $BRAINER_FILES_FOLDER
+			echo 'Brainer & modules successfully removed from this workspace.'
+			exit 0
+		else
+			echo 'Remove aborted.'
+			exit 1
+		fi
+	elif [ "$1" = "--remove" ] && [ "$2" = "-y" ]; then
+		echo 'Proceeding to delete brainer...'
+		rm -rf $BRAINER_EXEC $BRAINER_FILES_FOLDER
+		echo 'Brainer successfully removed from this workspace.'
+		exit 0
+	elif [ "$1" = "--remove" ]; then
+		user-confirmation-prompt "Do you want to delete brainer? [yes|no]: "
+		if [ $? -eq 0 ]; then
+			echo 'Proceeding to delete brainer...'
+			rm -rf $BRAINER_EXEC $BRAINER_FILES_FOLDER
+			echo 'Brainer successfully removed from this workspace.'
+			exit 0
+		else
+			echo 'Remove aborted.'
+			exit 1
+		fi
+	fi
+	;;
+*)
+	echo "ERROR: Unrecognized $1 option."
+	exit 2
+	shift 
+	;;
+esac
+done
+
+
+
